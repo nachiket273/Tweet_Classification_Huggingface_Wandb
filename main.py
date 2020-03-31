@@ -1,16 +1,20 @@
 import argparse
-import dataset
-import model
 import numpy as np
 import os
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import precision_score, recall_score
+from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 import time
 import torch
-import train
 import transformers
 from transformers import get_linear_schedule_with_warmup
+
+import dataset
+import model
+import preprocess
+import train
 import util
 
 def run():
@@ -23,11 +27,12 @@ def run():
     parser.add_argument('--train_file', type=str, help='training file path')
     parser.add_argument('--test_file', type=str, help='testing file path')
     parser.add_argument('--max_len', default=512, type=int, help='token length')
-    parser.add_argument('--model_path', type=str, help='Bert Model file path')
     parser.add_argument('--dropout_ratio', default=0.3, type=float, help='dropout ratio')
     parser.add_argument('--num_classes', default=1, type=int, help='number of output classes')
     parser.add_argument('--warmup_epochs', default=0, type=int, help='number of warmup epochs')
-    parser.add_argument('--')
+    parser.add_argument('--plot_stats', default=False, type=bool, help='Plot loss and accuracy plots')
+    parser.add_argument('--preprocess', default=False, type=bool, help='Preprocess training and test set')
+    parser.add_argument('--use_keyword', default=False, type=bool, help='Use keyword column for training')
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -39,14 +44,34 @@ def run():
     train_df = pd.read_csv(args.train_file)
     test_df = pd.read_csv(args.test_file)
 
+    # Fix some targets
+    ids_with_target_error = [328,443,513,2619,3640,3900,4342,5781,6552,6554,6570,6701,6702,6729,6861,7226]
+    train_df.at[train_df['id'].isin(ids_with_target_error),'target'] = 0
+
     train_y = train_df['target']
+    train_df.drop(['target'], axis=1, inplace=True)
 
-    train_df['keyword'].fillna("none", inplace = True)
-    txt = [str(i) + "\n" + str(j) for i, j in zip(train_df['keyword'], train_df['text'])]
-    train_df['txt'] = txt
+    if args.preprocess:
+        # Concat train and test df to preprocess at the same time
+        train_idx = len(train_df)
 
-    X_train, X_test, y_train, y_test \
-        = train_test_split(train_df['txt'], train_y, random_state=42, test_size=0.2, stratify=train_df.target.values)
+        total_df = train_df.append(test_df, ignore_index=True)
+        total_df = preprocess.preprocess(total_df, args.use_keyword)
+
+        train_df = total_df[:train_idx]
+        test_df = total_df[train_idx:]
+
+    if args.use_keyword:
+        txt = [str(i) + "\n" + str(j) for i, j in zip(train_df['keyword'], train_df['text'])]
+        train_df['txt'] = txt
+
+        X_train, X_test, y_train, y_test \
+        = train_test_split(train_df['txt'], train_y, random_state=42, test_size=0.2, stratify=train_y.values)
+    else:
+        X_train, X_test, y_train, y_test \
+        = train_test_split(train_df['text'], train_y, random_state=42, test_size=0.2, stratify=train_y.values)
+
+    
 
     X_train = X_train.reset_index(drop=True)
     X_test = X_test.reset_index(drop=True)
@@ -62,14 +87,16 @@ def run():
         text=X_train.values,
         tokenizer= tokenizer,
         max_len=args.max_len,
-        target=y_train.values
+        target=y_train.values,
+        use_keywords= args.use_keyword
     )
 
     valid_dataset = dataset.BertDataset(
         text=X_test.values,
         tokenizer= tokenizer,
         max_len=args.max_len,
-        target=y_test.values
+        target=y_test.values,
+        use_keywords= args.use_keyword
     )
 
     train_dl = torch.utils.data.DataLoader(
@@ -110,7 +137,6 @@ def run():
     valid_stat = util.AvgStats()
 
     best_acc = 0.0
-    best_f1_score = 0.0
 
     criterion = torch.nn.CrossEntropyLoss()
 
@@ -122,14 +148,20 @@ def run():
         train_acc = accuracy_score(ops, targs)
         train_f1_score = f1_score(ops, targs)
         train_loss = sum(losses)/len(losses)
-        train_stat.append(train_loss, train_acc, train_f1_score, duration)
+        train_prec = precision_score(ops, targs)
+        train_rec = recall_score(ops, targs)
+        train_roc_auc = roc_auc_score(ops, targs)
+        train_stat.append(train_loss, train_acc, train_f1_score, train_prec, train_rec, train_roc_auc, duration)
         start = time.time()
         lossesv, opsv, targsv = train.test(valid_dl, bert, criterion, device)
         duration = time.time() - start
         valid_acc = accuracy_score(opsv, targsv)
         valid_f1_score = f1_score(opsv, targsv)
         valid_loss = sum(lossesv)/len(lossesv)
-        valid_stat.append(valid_loss, valid_acc, valid_f1_score, duration)
+        valid_prec = precision_score(opsv, targsv)
+        valid_rec = recall_score(opsv, targsv)
+        valid_roc_auc = roc_auc_score(opsv, targsv)
+        valid_stat.append(valid_loss, valid_acc, valid_f1_score, valid_prec, valid_rec, valid_roc_auc, duration)
         if valid_acc > best_acc:
             best_acc = valid_acc
             util.save_checkpoint(bert, True, './best_acc_model.pth.tar')
@@ -137,17 +169,26 @@ def run():
                                                     train_f1_score, valid_acc*100, 
                                                     valid_loss, valid_f1_score))
 
+    if args.plot_stats:
+        util.plot(train_stat, valid_stat)
     
     # Now Load best model and get predictions
-    test_df['keyword'].fillna("none", inplace = True)
-    txt = [str(i) + "\n" + str(j) for i, j in zip(test_df['keyword'], test_df['text'])]
-    test_df['txt'] = txt
-
-    test_dataset = dataset.BertDataset(
-        text=test_df.txt.values,
-        tokenizer= tokenizer,
-        max_len=args.max_len,
-    )
+    if args.use_keyword:
+        txt = [str(i) + "\n" + str(j) for i, j in zip(test_df['keyword'], test_df['text'])]
+        test_df['txt'] = txt
+        test_dataset = dataset.BertDataset(
+            text=test_df.txt.values,
+            tokenizer= tokenizer,
+            max_len=args.max_len,
+            use_keywords= args.use_keyword
+        )
+    else:
+        test_dataset = dataset.BertDataset(
+            text=test_df.text.values,
+            tokenizer= tokenizer,
+            max_len=args.max_len,
+            use_keywords= args.use_keyword
+        )
 
     test_dl = torch.utils.data.DataLoader(
         test_dataset,
@@ -157,7 +198,14 @@ def run():
     )
 
     util.load_checkpoint(bert, './best_acc_model.pth.tar')
-    lossest, opst, _ = train.test(test_dl, bert, criterion, device)
+    _, opst, _ = train.test(test_dl, bert, criterion, device)
+
+    sub_csv = pd.DataFrame(columns=['id', 'target'])
+    sub_csv['id'] = test_df['id']
+    sub_csv['target'] = opst
+
+    sub_csv.to_csv('./submission.csv', index=False)
+
 
 if __name__ == "__main__":
     run()
