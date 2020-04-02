@@ -2,21 +2,10 @@
 Simple Repository for kaggle competition regarding [tweet classification](https://www.kaggle.com/c/nlp-getting-started).
 This repository uses huggingface tokenizer and transformer model which case specified as input argument, and tracks accuracy, losses and gradients using [wandb](https://www.wandb.com/).
 
-# Code Structure
-dataset.py    - Creates dataset from input dataframe to be used by dataloader.
-model.py      - Defines the model. Currently model consists of pretrained bert 
-                model , a dropout layer and liner layer.
-preprocess.py - Data preprocessor. Currently it preprocesses keyword field (to 
-                lower) and text field ( removes urls , punctuations, special characters,
-                emoji's , expands standard contractions)
-train.py      - Standard pytorch train and test loops.
-util.py       - Helper functions like saving and loading model checkpoints, plotting
-                graphs, tracking stats.
-main.py       - Caller file.
-
 # Usage
 
 Arguments:
+```
     --start_lr:  Initial Learning rate
                  default=3e-5, type=float
     --train_bs:  Batch Size for training
@@ -55,6 +44,7 @@ Arguments:
    --freeze:  If true, all other layers other than top linear layer
               will be freezed. 
               default=True, type=bool
+```
 
 Example:
 ```python
@@ -66,7 +56,7 @@ python main.py --start_lr 3e-5 --train_bs 8 --valid_bs 4 --epochs 5 --model_name
 
 # Dependencies:
 
-* [transformers] (https://github.com/huggingface/transformers)
+* [transformers](https://github.com/huggingface/transformers)
 * [wandb](https://www.wandb.com/)
 
 These libraries can be installed through pip
