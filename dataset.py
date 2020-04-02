@@ -2,7 +2,7 @@ import torch
 
 
 class BertDataset:
-    def __init__(self, text, tokenizer, max_len, target=[], use_keywords=False):
+    def __init__(self, text, tokenizer, max_len, target=None, use_keywords=False):
         self.text = text
         self.target = target
         self.tokenizer = tokenizer
@@ -35,14 +35,16 @@ class BertDataset:
         masks = output['attention_mask']
         token_type_ids = output['token_type_ids']
 
-        if len(self.target) > 0:
-            target = self.target[idx]
-        else:
-            target = []
-
-        return {
+        if self.target is not None:
+            return {
                 'input_ids': torch.tensor(ids, dtype=torch.long),
                 'attention_mask': torch.tensor(masks, dtype=torch.long),
                 'token_type_ids': torch.tensor(token_type_ids, dtype=torch.long),
-                'targets': torch.tensor(target, dtype=torch.float)
-        }
+                'targets': torch.tensor(self.target[idx], dtype=torch.float)
+            }
+        else:
+            return {
+                'input_ids': torch.tensor(ids, dtype=torch.long),
+                'attention_mask': torch.tensor(masks, dtype=torch.long),
+                'token_type_ids': torch.tensor(token_type_ids, dtype=torch.long)
+            }
