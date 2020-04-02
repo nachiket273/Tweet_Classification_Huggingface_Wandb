@@ -14,8 +14,10 @@ Arguments:
                  default=4, type=int
     --epochs:    Number of  training 
                  epochs default=1, type=int
-   --model_name: [Pretrained Bert Model name to be loaded 
-                 from huggingface transformer library](https://huggingface.co/transformers/pretrained_models.html)
+   --model_name: Pretrained Bert Model name to be loaded 
+                 from huggingface transformer library
+                 Names can be found:
+                 https://huggingface.co/transformers/pretrained_models.html
                  type=str
    --train_file: Path to train csv file.
                  type=str
