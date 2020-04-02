@@ -1,6 +1,7 @@
 # Tweet_Classification_Huggingface_Wandb
 Simple Repository for kaggle competition regarding [tweet classification](https://www.kaggle.com/c/nlp-getting-started).
-This repository uses huggingface tokenizer and transformer model which case specified as input argument, and tracks accuracy, losses and gradients using [wandb](https://www.wandb.com/).
+This repository uses [huggingface](https://huggingface.co/welcome) tokenizer and transformer model which case specified 
+as input argument, and tracks accuracy, losses and gradients using [wandb](https://www.wandb.com/).
 
 # Usage
 
