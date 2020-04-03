@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
+import numpy as np
 import os
-import pickle
+import random
 from sklearn.metrics import auc
 import torch
 
@@ -90,5 +91,11 @@ def plot(train_stats, valid_stats):
     plt.savefig('./plot.jpg')
     plt.show()
 
-
+def set_seed(seed):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
 

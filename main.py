@@ -6,6 +6,7 @@ from sklearn.metrics import accuracy_score, f1_score
 from sklearn.metrics import precision_score, recall_score
 from sklearn.metrics import roc_auc_score, roc_curve, auc
 from sklearn.model_selection import train_test_split
+from sklearn.utils import resample
 import time
 import torch
 import transformers
@@ -54,9 +55,13 @@ def run():
     parser.add_argument('--wandb_project_name', type=str, help="Name of wandb project")
     parser.add_argument('--wandb_key_file', type=str, help='File containing wandb API key(read-only)')
     parser.add_argument('--freeze', default=True, type=bool, help='If true all layers other than top linear layers will be freezed')
+    parser.add_argument('--test_size', default=0.2, type=float, help='Size of validation set')
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    SEED = 42
+    util.set_seed(SEED)
 
     assert(os.path.exists(args.train_file))
     assert(os.path.exists(args.test_file))
@@ -78,6 +83,18 @@ def run():
     ids_with_target_error = [328,443,513,2619,3640,3900,4342,5781,6552,6554,6570,6701,6702,6729,6861,7226]
     train_df.at[train_df['id'].isin(ids_with_target_error),'target'] = 0
 
+    # Remove Duplicates
+    train_df.drop_duplicates(['keyword', 'text', 'target'], keep='first', inplace=True)
+
+    if train_df[train_df['target'] == 0].shape[0] > train_df[train_df['target'] == 1].shape[0]:
+        count = train_df[train_df['target'] == 0].shape[0] - train_df[train_df['target'] == 1].shape[0]
+        df_minority_upsampled = resample(train_df[train_df['target'] == 1], replace=True, n_samples=count, random_state=SEED)
+    elif train_df[train_df['target'] == 1].shape[0] > train_df[train_df['target'] == 0].shape[0]:
+        count = train_df[train_df['target'] == 1].shape[0] - train_df[train_df['target'] == 0].shape[0]
+        df_minority_upsampled = resample(train_df[train_df['target'] == 0], replace=True, n_samples=count, random_state=SEED)
+
+    train_df = pd.concat([train_df, df_minority_upsampled], axis=0)
+
     train_y = train_df['target']
     train_df.drop(['target'], axis=1, inplace=True)
 
@@ -96,10 +113,10 @@ def run():
         train_df.loc[:, 'txt'] = txt
 
         X_train, X_test, y_train, y_test \
-        = train_test_split(train_df['txt'], train_y, random_state=42, test_size=0.2, stratify=train_y.values)
+        = train_test_split(train_df['txt'], train_y, random_state=SEED, test_size=args.test_size, stratify=train_y.values)
     else:
         X_train, X_test, y_train, y_test \
-        = train_test_split(train_df['text'], train_y, random_state=42, test_size=0.2, stratify=train_y.values)  
+        = train_test_split(train_df['text'], train_y, random_state=SEED, test_size=args.test_size, stratify=train_y.values)  
 
     X_train = X_train.reset_index(drop=True)
     X_test = X_test.reset_index(drop=True)
@@ -163,11 +180,11 @@ def run():
     no_decay = ['bias', 'LayerNorm.weight', 'LayerNorm.bias']
     params = list(bert.named_parameters())
     modified_params = [
-        {'params': [p for n, p in params if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+        {'params': [p for n, p in params if not any(nd in n for nd in no_decay)], 'weight_decay': 0.001},
         {'params': [p for n, p in params if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
 
-    optim = torch.optim.AdamW(modified_params, lr=args.start_lr, weight_decay=1e-4)
+    optim = torch.optim.AdamW(modified_params, lr=args.start_lr)
 
     total_steps = int(len(train_df) * args.epochs / args.train_bs)
     warmup_steps = int(len(train_df) * args.warmup_epochs / args.train_bs)
@@ -261,7 +278,8 @@ def run():
     sub_csv['id'] = test_df['id']
     sub_csv['target'] = opst
 
-    sub_csv.to_csv('./submission.csv', index=False)
+    csv_name =  "./" + str(args.model_name) + "_sub.csv"
+    sub_csv.to_csv(csv_name, index=False)
 
 
 if __name__ == "__main__":
