@@ -11,8 +11,9 @@ import time
 import torch
 import transformers
 import wandb
-from transformers import get_linear_schedule_with_warmup
+from transformers import get_cosine_schedule_with_warmup
 
+import config
 import dataset
 import model
 import preprocess
@@ -36,26 +37,16 @@ def log_wandb(wandb, targets, preds, vtargets, vpreds, train_stats, valid_stats,
     wandb.log({"Training Loss": train_stats.losses[i]})
     wandb.log({"Validation Loss": valid_stats.losses[i]})
 
+def is_true(ip):
+    return str(ip).lower() == 'true'
+
 def run():
-    parser = argparse.ArgumentParser(description='Hugginface Bert for tweet classification')
-    parser.add_argument('--start_lr', default=0.1, type=float, help='learning rate')
-    parser.add_argument('--train_bs', default=8, type=int, help='batch size for training')
-    parser.add_argument('--valid_bs', default=4, type=int, help='batch size for validation')
-    parser.add_argument('--epochs', default=1, type=int, help='Number of epochs')
-    parser.add_argument('--model_name', type=str, help='bert model name')
-    parser.add_argument('--train_file', type=str, help='training file path')
-    parser.add_argument('--test_file', type=str, help='testing file path')
-    parser.add_argument('--max_len', default=512, type=int, help='token length')
-    parser.add_argument('--dropout_ratio', default=0.3, type=float, help='dropout ratio')
-    parser.add_argument('--num_classes', default=1, type=int, help='number of output classes')
-    parser.add_argument('--warmup_epochs', default=0, type=int, help='number of warmup epochs')
-    parser.add_argument('--plot_stats', default=False, type=bool, help='Plot loss and accuracy plots')
-    parser.add_argument('--preprocess', default=False, type=bool, help='Preprocess training and test set')
-    parser.add_argument('--use_keyword', default=False, type=bool, help='Use keyword column for training')
-    parser.add_argument('--wandb_project_name', type=str, help="Name of wandb project")
-    parser.add_argument('--wandb_key_file', type=str, help='File containing wandb API key(read-only)')
-    parser.add_argument('--freeze', default=True, type=bool, help='If true all layers other than top linear layers will be freezed')
-    parser.add_argument('--test_size', default=0.2, type=float, help='Size of validation set')
+    parser = argparse.ArgumentParser(description='Tweet Classification')
+    parser.add_argument('--freeze', default=True, type=is_true, help='If true all layers other than top linear layers will be freezed')
+    parser.add_argument('--save_plot', default=False, type=is_true, help='Save loss and accuracy plots')
+    parser.add_argument('--track', default=False, type=is_true, help='Track the stats using wandb.')
+    parser.add_argument('--wandb_project_name', type=str, help="Name of wandb project.")
+    parser.add_argument('--wandb_key_file', type=str, help='File containing wandb API key(read-only).')
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -63,25 +54,27 @@ def run():
     SEED = 42
     util.set_seed(SEED)
 
-    assert(os.path.exists(args.train_file))
-    assert(os.path.exists(args.test_file))
-    assert(args.warmup_epochs < args.epochs)
-    assert(os.path.exists(args.wandb_key_file))
+    assert(os.path.exists(config.train_file))
+    assert(os.path.exists(config.test_file))
+    assert(config.warmup_epochs < config.epochs)
 
-    with open(args.wandb_key_file, 'r') as f:
-        api_key = f.readline()
-        api_key = str(api_key).strip()
-        wandb.login(key=api_key)
+    if args.track:
+        assert(os.path.exists(args.wandb_key_file))
+        with open(args.wandb_key_file, 'r') as f:
+            api_key = f.readline()
+            api_key = str(api_key).strip()
+            wandb.login(key=api_key)
 
-    os.environ['WANDB_NAME'] = 'hf_' + str(args.model_name) + "_" + str(int(time.time()))
-    wandb.init(project=args.wandb_project_name)
+        os.environ['WANDB_NAME'] = 'hf_' + str(config.model_name) + "_" + str(int(time.time()))
+        wandb.init(project=args.wandb_project_name)
     
-    train_df = pd.read_csv(args.train_file)
-    test_df = pd.read_csv(args.test_file)
+    train_df = pd.read_csv(config.train_file)
+    test_df = pd.read_csv(config.test_file)
 
     # Fix some targets
+    '''
     ids_with_target_error = [328,443,513,2619,3640,3900,4342,5781,6552,6554,6570,6701,6702,6729,6861,7226]
-    train_df.at[train_df['id'].isin(ids_with_target_error),'target'] = 0
+    train_df = preprocess.fix_erraneous(train_df, ids_with_target_error, 0)
 
     # Remove Duplicates
     train_df.drop_duplicates(['keyword', 'text', 'target'], keep='first', inplace=True)
@@ -94,29 +87,22 @@ def run():
         df_minority_upsampled = resample(train_df[train_df['target'] == 0], replace=True, n_samples=count, random_state=SEED)
 
     train_df = pd.concat([train_df, df_minority_upsampled], axis=0)
+    '''
 
     train_y = train_df['target']
     train_df.drop(['target'], axis=1, inplace=True)
 
-    if args.preprocess:
-        # Concat train and test df to preprocess at the same time
-        train_idx = len(train_df)
+    # Concat train and test df to preprocess at the same time
+    train_idx = len(train_df)
 
-        total_df = train_df.append(test_df, ignore_index=True)
-        total_df = preprocess.preprocess(total_df, args.use_keyword)
+    total_df = train_df.append(test_df, ignore_index=True)
+    total_df = preprocess.preprocess(total_df)
 
-        train_df = total_df[:train_idx]
-        test_df = total_df[train_idx:]
+    train_df = total_df[:train_idx]
+    test_df = total_df[train_idx:]
 
-    if args.use_keyword:
-        txt = [str(i) + "\n" + str(j) for i, j in zip(train_df['keyword'], train_df['text'])]
-        train_df.loc[:, 'txt'] = txt
-
-        X_train, X_test, y_train, y_test \
-        = train_test_split(train_df['txt'], train_y, random_state=SEED, test_size=args.test_size, stratify=train_y.values)
-    else:
-        X_train, X_test, y_train, y_test \
-        = train_test_split(train_df['text'], train_y, random_state=SEED, test_size=args.test_size, stratify=train_y.values)  
+    X_train, X_test, y_train, y_test \
+        = train_test_split(train_df['text'], train_y, random_state=SEED, test_size=config.test_size, stratify=train_y.values)  
 
     X_train = X_train.reset_index(drop=True)
     X_test = X_test.reset_index(drop=True)
@@ -124,41 +110,39 @@ def run():
     y_test = y_test.reset_index(drop=True)
 
     tokenizer = transformers.BertTokenizer.from_pretrained(
-        args.model_name,
+        config.model_name,
         do_lower_case=True
     )
 
     train_dataset = dataset.BertDataset(
         text=X_train.values,
         tokenizer= tokenizer,
-        max_len=args.max_len,
-        target=y_train.values,
-        use_keywords= args.use_keyword
+        max_len=config.max_len,
+        target=y_train.values
     )
 
     valid_dataset = dataset.BertDataset(
         text=X_test.values,
         tokenizer= tokenizer,
-        max_len=args.max_len,
-        target=y_test.values,
-        use_keywords= args.use_keyword
+        max_len=config.max_len,
+        target=y_test.values
     )
 
     train_dl = torch.utils.data.DataLoader(
         train_dataset,
-        args.train_bs,
+        config.train_bs,
         shuffle=True,
         num_workers=4
     )
 
     valid_dl = torch.utils.data.DataLoader(
         valid_dataset,
-        args.valid_bs,
+        config.valid_bs,
         shuffle=True,
         num_workers=1
     )
 
-    bert = model.BertUncased(args.model_name, dp=args.dropout_ratio, num_classes=args.num_classes)
+    bert = model.BertUncased(config.model_name, dp=config.dropout_ratio, num_classes=config.num_classes, linear_in=config.linear_in)
     bert = bert.to(device)
 
     if args.freeze:
@@ -172,7 +156,8 @@ def run():
         for param in bert.parameters():
             param.requires_grad = True
 
-    wandb.watch(bert)
+    if args.track:
+        wandb.watch(bert)
 
     for param in bert.parameters():
         param.requires_grad = True
@@ -184,23 +169,23 @@ def run():
         {'params': [p for n, p in params if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
 
-    optim = torch.optim.AdamW(modified_params, lr=args.start_lr)
+    optim = torch.optim.AdamW(modified_params, lr=config.start_lr)
 
-    total_steps = int(len(train_df) * args.epochs / args.train_bs)
-    warmup_steps = int(len(train_df) * args.warmup_epochs / args.train_bs)
+    total_steps = int(len(train_df) * config.epochs / config.train_bs)
+    warmup_steps = int(len(train_df) * config.warmup_epochs / config.train_bs)
 
-    sched = get_linear_schedule_with_warmup(optim, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
+    sched = get_cosine_schedule_with_warmup(optim, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
 
     train_stat = util.AvgStats()
     valid_stat = util.AvgStats()
 
     best_acc = 0.0
-    best_model_file = str(args.model_name) + '_best.pth.tar'
+    best_model_file = str(config.model_name) + '_best.pth.tar'
 
     criterion = torch.nn.CrossEntropyLoss()
 
     print("\nEpoch\tTrain Acc\tTrain Loss\tTrain F1\tValid Acc\tValid Loss\tValid F1")
-    for i in range(args.epochs):
+    for i in range(config.epochs):
         start = time.time()
         losses, ops, targs = train.train(train_dl, bert, criterion, optim, sched, device)
         duration = time.time() - start
@@ -230,8 +215,8 @@ def run():
             vfpr, vtpr, _ = roc_curve(targsv, opsv)
             valid_stat.update_best(vtpr, vfpr, best_acc, i)
 
-        
-        log_wandb(wandb, targs, ops, targsv, opsv, train_stat, valid_stat, i)
+        if args.track:
+            log_wandb(wandb, targs, ops, targsv, opsv, train_stat, valid_stat, i)
 
         print("\n{}\t{:06.8f}\t{:06.8f}\t{:06.8f}\t{:06.8f}\t{:06.8f}\t{:06.8f}".format(i+1, train_acc*100, train_loss, 
                                                     train_f1_score, valid_acc*100, 
@@ -243,26 +228,15 @@ def run():
     print("Loss: {}".format(valid_stat.losses[valid_stat.best_epoch]))
     print("Area Under Curve: {}".format(auc(valid_stat.fprs, valid_stat.tprs)))
 
-    if args.plot_stats:
+    if args.save_plot:
         util.plot(train_stat, valid_stat)
     
     # Now Load best model and get predictions
-    if args.use_keyword:
-        txt = [str(i) + "\n" + str(j) for i, j in zip(test_df['keyword'], test_df['text'])]
-        test_df.loc[:, 'txt'] = txt
-        test_dataset = dataset.BertDataset(
-            text=test_df.txt.values,
-            tokenizer= tokenizer,
-            max_len=args.max_len,
-            use_keywords= args.use_keyword
-        )
-    else:
-        test_dataset = dataset.BertDataset(
-            text=test_df.text.values,
-            tokenizer= tokenizer,
-            max_len=args.max_len,
-            use_keywords= args.use_keyword
-        )
+    test_dataset = dataset.BertDataset(
+        text=test_df.text.values,
+        tokenizer= tokenizer,
+        max_len=config.max_len
+    )
 
     test_dl = torch.utils.data.DataLoader(
         test_dataset,
@@ -278,7 +252,7 @@ def run():
     sub_csv['id'] = test_df['id']
     sub_csv['target'] = opst
 
-    csv_name =  "./" + str(args.model_name) + "_sub.csv"
+    csv_name =  "./" + str(config.model_name) + "_sub.csv"
     sub_csv.to_csv(csv_name, index=False)
 
 

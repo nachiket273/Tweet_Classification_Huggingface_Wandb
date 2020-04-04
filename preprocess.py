@@ -82,13 +82,6 @@ contractions = {
     "thx"   : "thanks"
 }
 
-def update_keywords(text):
-    text = re.sub(r'wild fires', 'wildfire', text)
-    text = re.sub(r'forest fires', 'forest fire', text)
-    text = re.sub(r'body bags', 'body bag', text)
-    text = re.sub(r'buildings burning', 'burning buildings', text)
-    return text
-
 def remove_emoji(text):
     emoji_pattern = re.compile("["
                            u"\U0001F600-\U0001F64F"  # emoticons
@@ -110,26 +103,29 @@ def remove_contractions(text):
     return contractions[text.lower()] if text.lower() in contractions.keys() else text
 
 def remove_punctuations(text):
-    text = str(text)
-    punctuations = '''!()-[]{};:|'"\,<>./?@#$%^&*_~'''
-    for x in text:
-        if x in punctuations:
-            text = text.replace(x, '')
+    punctuations = '@#!?+&*[]-%.:/();$=><|{}^' + "'`"
+    
+    for p in punctuations:
+        text = text.replace(p, f' {p} ')
+
+    text = text.replace('...', ' ... ')
+    
+    if '...' not in text:
+        text = text.replace('..', ' ... ')
+    
     return text
 
-def preprocess(df, preprocess_keywords=False):
-    if preprocess_keywords:
-        # preprocess keywords
-        df['keyword'].fillna("none", inplace = True)
-        df['keyword'] = df['keyword'].apply(lambda k: update_keywords(k))
-        df['keyword'] = df['keyword'].apply(lambda k: k.lower())
-
+def preprocess(df):
     # preprocess text
     df['text'] = df['text'].apply(lambda k: remove_url(k))
     df['text'] = df['text'].apply(lambda k: remove_non_ascii(k))
     df['text'] = df['text'].apply(lambda k: remove_emoji(k))
-    df['text'] = df['text'].apply(lambda k: remove_contractions(k))
     df['text'] = df['text'].apply(lambda k: remove_punctuations(k))
+    df['text'] = df['text'].apply(lambda k: remove_contractions(k))
     df['text'] = df['text'].apply(lambda k: k.lower())
  
+    return df
+
+def fix_erraneous(df, ids, target):
+    df.at[df['id'].isin(ids),'target'] = target
     return df

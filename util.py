@@ -1,8 +1,10 @@
+import config
 import matplotlib.pyplot as plt
 import numpy as np
 import os
 import random
 from sklearn.metrics import auc
+import time
 import torch
 
 class AvgStats(object):
@@ -88,8 +90,8 @@ def plot(train_stats, valid_stats):
     axs[1,1].set_xlabel("FPR")
     axs[1,1].legend()
 
-    plt.savefig('./plot.jpg')
-    plt.show()
+    savefile = str(config.model_name) + '_' + str(int(time.time())) + '.png'
+    plt.savefig(savefile)
 
 def set_seed(seed):
     random.seed(seed)
