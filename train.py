@@ -1,7 +1,7 @@
 import torch
 import tqdm as tqdm
 
-def train(loader, model, crit, optimizer, sched, device):
+def train(loader, model, crit, optimizer, sched=None, device='cpu'):
     model.train()
     t = tqdm.tqdm(loader, leave=False, total=len(loader))
     losses = []
@@ -26,7 +26,8 @@ def train(loader, model, crit, optimizer, sched, device):
         loss.backward()
 
         optimizer.step()
-        sched.step()
+        if sched:
+            sched.step()
 
         op = torch.max(outputs.data, 1)[1]
         ops.extend(op.cpu().detach().numpy().tolist())

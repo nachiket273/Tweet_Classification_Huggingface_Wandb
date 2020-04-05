@@ -11,7 +11,7 @@ import time
 import torch
 import transformers
 import wandb
-from transformers import get_cosine_schedule_with_warmup
+from transformers import get_linear_schedule_with_warmup
 
 import config
 import dataset
@@ -51,7 +51,7 @@ def run():
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    SEED = 42
+    SEED = config.seed
     util.set_seed(SEED)
 
     assert(os.path.exists(config.train_file))
@@ -72,22 +72,25 @@ def run():
     test_df = pd.read_csv(config.test_file)
 
     # Fix some targets
-    '''
     ids_with_target_error = [328,443,513,2619,3640,3900,4342,5781,6552,6554,6570,6701,6702,6729,6861,7226]
     train_df = preprocess.fix_erraneous(train_df, ids_with_target_error, 0)
 
     # Remove Duplicates
-    train_df.drop_duplicates(['keyword', 'text', 'target'], keep='first', inplace=True)
+    #train_df.drop_duplicates(['keyword', 'text', 'target'], keep='first', inplace=True)
 
     if train_df[train_df['target'] == 0].shape[0] > train_df[train_df['target'] == 1].shape[0]:
         count = train_df[train_df['target'] == 0].shape[0] - train_df[train_df['target'] == 1].shape[0]
-        df_minority_upsampled = resample(train_df[train_df['target'] == 1], replace=True, n_samples=count, random_state=SEED)
+        df_sampled = train_df[train_df['target'] == 0].sample(n=count, random_state=SEED)
     elif train_df[train_df['target'] == 1].shape[0] > train_df[train_df['target'] == 0].shape[0]:
         count = train_df[train_df['target'] == 1].shape[0] - train_df[train_df['target'] == 0].shape[0]
-        df_minority_upsampled = resample(train_df[train_df['target'] == 0], replace=True, n_samples=count, random_state=SEED)
+        df_sampled = train_df[train_df['target'] == 1].sample(n=count, random_state=SEED)
 
-    train_df = pd.concat([train_df, df_minority_upsampled], axis=0)
-    '''
+    for id in df_sampled['id']:
+        train_df.drop(train_df[train_df['id'] == id].index[0], inplace=True)
+
+    print(train_df[train_df['target'] == 0].shape[0])
+    print(train_df[train_df['target'] == 1].shape[0])
+    #train_df = pd.concat([train_df, df_minority_upsampled], axis=0)
 
     train_y = train_df['target']
     train_df.drop(['target'], axis=1, inplace=True)
@@ -142,7 +145,7 @@ def run():
         num_workers=1
     )
 
-    bert = model.BertUncased(config.model_name, dp=config.dropout_ratio, num_classes=config.num_classes, linear_in=config.linear_in)
+    bert = model.BertHf(config.model_name, dp=config.dropout_ratio, num_classes=config.num_classes, linear_in=config.linear_in)
     bert = bert.to(device)
 
     if args.freeze:
@@ -169,12 +172,15 @@ def run():
         {'params': [p for n, p in params if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
 
-    optim = torch.optim.AdamW(modified_params, lr=config.start_lr)
+    optim = torch.optim.Adam(modified_params, lr=config.start_lr)
 
     total_steps = int(len(train_df) * config.epochs / config.train_bs)
     warmup_steps = int(len(train_df) * config.warmup_epochs / config.train_bs)
 
-    sched = get_cosine_schedule_with_warmup(optim, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
+    if config.use_sched:
+        sched = get_linear_schedule_with_warmup(optim, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
+    else:
+        sched = None
 
     train_stat = util.AvgStats()
     valid_stat = util.AvgStats()
