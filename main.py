@@ -11,6 +11,7 @@ import time
 import torch
 import transformers
 import wandb
+from transformers import BertConfig
 from transformers import get_linear_schedule_with_warmup
 
 import config
@@ -168,11 +169,11 @@ def run():
     no_decay = ['bias', 'LayerNorm.weight', 'LayerNorm.bias']
     params = list(bert.named_parameters())
     modified_params = [
-        {'params': [p for n, p in params if not any(nd in n for nd in no_decay)], 'weight_decay': 0.001},
+        {'params': [p for n, p in params if not any(nd in n for nd in no_decay)], 'weight_decay': 0.1},
         {'params': [p for n, p in params if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
 
-    optim = torch.optim.Adam(modified_params, lr=config.start_lr)
+    optim = torch.optim.AdamW(modified_params, lr=config.start_lr, eps=1e-8)
 
     total_steps = int(len(train_df) * config.epochs / config.train_bs)
     warmup_steps = int(len(train_df) * config.warmup_epochs / config.train_bs)
