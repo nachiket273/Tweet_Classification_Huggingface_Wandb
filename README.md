@@ -4,9 +4,36 @@ This repository uses [huggingface](https://huggingface.co/welcome) tokenizer and
 as input argument, and tracks accuracy, losses and gradients using [wandb](https://www.wandb.com/).
 
 # Configuration
-config.py contains all the default configuration parameters.
-They are used by code to create and load model, load train and test data, decide dropout ratio etc.
-Look through [config.py](./config.py) for more information.
+config.txt contains all the default configuration parameters.
+They are used by code to create and load model, load train and test data, get batch size,
+decide dropout ratio etc.
+Look through [config.txt](./config.txt) for more parameters.
+
+*Defaults*
+```
+[DEFAULT]
+start_lr = 2e-5
+train_bs = 8
+valid_bs = 8
+epochs = 5
+max_len = 160
+dropout_ratio = 0.1
+linear_in = 768
+num_classes = 2
+warmup_epochs = 0
+test_size = 0.2
+train_file ='./train.csv'
+test_file = './test.csv'
+model_name = 'bert-base-uncased'
+seed = 42
+use_sched = True
+```
+
+Use get_config and set_config from [config.py](./config.py) to read and update config.txt.
+set_config accepts dictonary to set new values for parameters.
+
+*Note:-* get_config and set_config use configparser to get and set config, and config.txt
+adheres to file structure expected by configparser.
 
 # Usage
 
@@ -32,6 +59,9 @@ python main.py --freeze False --track True
 # Track using wandb
 python main.py --track True --wandb_project_name <name_of_project>
 ```
+*NOTE:-* When '--track' is True, program expects wandb API key to be set
+through enviornment variable 'WANDB_API_KEY'.
+
 # Dependencies:
 
 * [transformers](https://github.com/huggingface/transformers)
