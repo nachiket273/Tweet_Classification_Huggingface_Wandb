@@ -12,7 +12,7 @@ Look through [config.txt](./config.txt) for more parameters.
 *Defaults*
 ```
 [DEFAULT]
-start_lr = 3e-5
+start_lr = 2e-5
 train_bs = 8
 valid_bs = 8
 epochs = 5
