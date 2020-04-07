@@ -47,30 +47,42 @@ def run():
     parser.add_argument('--save_plot', default=False, type=is_true, help='Save loss and accuracy plots')
     parser.add_argument('--track', default=False, type=is_true, help='Track the stats using wandb.')
     parser.add_argument('--wandb_project_name', type=str, help="Name of wandb project.")
-    parser.add_argument('--wandb_key_file', type=str, help='File containing wandb API key(read-only).')
     args = parser.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    SEED = config.seed
+    configs = config.get_config()
+
+    train_file = configs['train_file'][1:-1]
+    test_file = configs['test_file'][1:-1]
+    warmup_epochs = int(configs['warmup_epochs'])
+    epochs = int(configs['epochs'])
+    model_name = configs['model_name'][1:-1]
+    test_size = float(configs['test_size'])
+    dropout = float(configs['dropout_ratio'])
+    num_classes = int(configs['num_classes'])
+    linear_in = int(configs['linear_in'])
+    max_len = int(configs['max_len'])
+    train_bs = int(configs['train_bs'])
+    valid_bs = int(configs['valid_bs'])
+    start_lr = float(configs['start_lr'])
+
+    SEED = int(configs['seed'])
     util.set_seed(SEED)
 
-    assert(os.path.exists(config.train_file))
-    assert(os.path.exists(config.test_file))
-    assert(config.warmup_epochs < config.epochs)
+    assert(os.path.exists(train_file))
+    assert(os.path.exists(test_file))
+    assert(warmup_epochs < epochs)
 
     if args.track:
-        assert(os.path.exists(args.wandb_key_file))
-        with open(args.wandb_key_file, 'r') as f:
-            api_key = f.readline()
-            api_key = str(api_key).strip()
-            wandb.login(key=api_key)
+        if not 'WANDB_API_KEY' in os.environ:
+            raise Exception('wandb api key is not set in th enviornment.')
 
-        os.environ['WANDB_NAME'] = 'hf_' + str(config.model_name) + "_" + str(int(time.time()))
+        os.environ['WANDB_NAME'] = 'hf_' + str(model_name) + "_" + str(int(time.time()))
         wandb.init(project=args.wandb_project_name)
     
-    train_df = pd.read_csv(config.train_file)
-    test_df = pd.read_csv(config.test_file)
+    train_df = pd.read_csv(train_file)
+    test_df = pd.read_csv(test_file)
 
     # Fix some targets
     ids_with_target_error = [328,443,513,2619,3640,3900,4342,5781,6552,6554,6570,6701,6702,6729,6861,7226]
@@ -106,7 +118,7 @@ def run():
     test_df = total_df[train_idx:]
 
     X_train, X_test, y_train, y_test \
-        = train_test_split(train_df['text'], train_y, random_state=SEED, test_size=config.test_size, stratify=train_y.values)  
+        = train_test_split(train_df['text'], train_y, random_state=SEED, test_size=test_size, stratify=train_y.values)  
 
     X_train = X_train.reset_index(drop=True)
     X_test = X_test.reset_index(drop=True)
@@ -114,39 +126,39 @@ def run():
     y_test = y_test.reset_index(drop=True)
 
     tokenizer = transformers.BertTokenizer.from_pretrained(
-        config.model_name,
+        model_name,
         do_lower_case=True
     )
 
     train_dataset = dataset.BertDataset(
         text=X_train.values,
         tokenizer= tokenizer,
-        max_len=config.max_len,
+        max_len= max_len,
         target=y_train.values
     )
 
     valid_dataset = dataset.BertDataset(
         text=X_test.values,
         tokenizer= tokenizer,
-        max_len=config.max_len,
+        max_len= max_len,
         target=y_test.values
     )
 
     train_dl = torch.utils.data.DataLoader(
         train_dataset,
-        config.train_bs,
+        train_bs,
         shuffle=True,
         num_workers=4
     )
 
     valid_dl = torch.utils.data.DataLoader(
         valid_dataset,
-        config.valid_bs,
+        valid_bs,
         shuffle=True,
         num_workers=1
     )
 
-    bert = model.BertHf(config.model_name, dp=config.dropout_ratio, num_classes=config.num_classes, linear_in=config.linear_in)
+    bert = model.BertHf(model_name, dp=dropout, num_classes=num_classes, linear_in=linear_in)
     bert = bert.to(device)
 
     if args.freeze:
@@ -173,12 +185,12 @@ def run():
         {'params': [p for n, p in params if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
 
-    optim = torch.optim.AdamW(modified_params, lr=config.start_lr, eps=1e-8)
+    optim = torch.optim.Adam(modified_params, lr=start_lr, eps=1e-8)
 
-    total_steps = int(len(train_df) * config.epochs / config.train_bs)
-    warmup_steps = int(len(train_df) * config.warmup_epochs / config.train_bs)
+    total_steps = int(len(train_df) * epochs / train_bs)
+    warmup_steps = int(len(train_df) * warmup_epochs / train_bs)
 
-    if config.use_sched:
+    if is_true(configs['use_sched']):
         sched = get_linear_schedule_with_warmup(optim, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
     else:
         sched = None
@@ -187,12 +199,12 @@ def run():
     valid_stat = util.AvgStats()
 
     best_acc = 0.0
-    best_model_file = str(config.model_name) + '_best.pth.tar'
+    best_model_file = str(model_name) + '_best.pth.tar'
 
     criterion = torch.nn.CrossEntropyLoss()
 
     print("\nEpoch\tTrain Acc\tTrain Loss\tTrain F1\tValid Acc\tValid Loss\tValid F1")
-    for i in range(config.epochs):
+    for i in range(epochs):
         start = time.time()
         losses, ops, targs = train.train(train_dl, bert, criterion, optim, sched, device)
         duration = time.time() - start
@@ -242,7 +254,7 @@ def run():
     test_dataset = dataset.BertDataset(
         text=test_df.text.values,
         tokenizer= tokenizer,
-        max_len=config.max_len
+        max_len= max_len
     )
 
     test_dl = torch.utils.data.DataLoader(
@@ -259,7 +271,7 @@ def run():
     sub_csv['id'] = test_df['id']
     sub_csv['target'] = opst
 
-    csv_name =  "./" + str(config.model_name) + "_sub.csv"
+    csv_name =  "./" + str(model_name) + "_sub.csv"
     sub_csv.to_csv(csv_name, index=False)
 
 

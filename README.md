@@ -19,7 +19,6 @@ Look through [config.py](./config.py) for more information.
     --track              : Track the stats using wandb.
                            Default: False
     --wandb_project_name : Name of wandb project.
-    --wandb_key_file     : File containing wandb API key(read-only).
 ```
 
 *Example*:
@@ -31,7 +30,7 @@ python main.py
 python main.py --freeze False --track True
 
 # Track using wandb
-python main.py --track True --wandb_project_name <name_of_project> --wandb_key_file <file_path_for_api_key>
+python main.py --track True --wandb_project_name <name_of_project>
 ```
 # Dependencies:
 

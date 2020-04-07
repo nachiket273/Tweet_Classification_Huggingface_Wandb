@@ -1,15 +1,16 @@
-start_lr = 3e-5
-train_bs = 8
-valid_bs = 8
-epochs = 5
-max_len = 160
-dropout_ratio = 0.1
-linear_in = 768
-num_classes = 2
-warmup_epochs = 0
-test_size = 0.2
-train_file ='./train.csv'
-test_file = './test.csv'
-model_name = 'bert-base-uncased'
-seed = 11
-use_sched = True
+import configparser
+
+def get_config():
+    parser = configparser.ConfigParser()
+    parser.read('config.txt')
+    return parser['DEFAULT']
+
+def set_config(configs):
+    assert(type(configs) == dict)
+    parser = configparser.ConfigParser()
+    parser.read('config.txt')
+    for key in configs.keys():
+        if key in parser['DEFAULT']:
+            parser.set('DEFAULT', key, str(configs[key]))
+
+    parser.write(open('config.txt', 'w'))

@@ -1,0 +1,16 @@
+[DEFAULT]
+start_lr = 3e-5
+train_bs = 8
+valid_bs = 8
+epochs = 5
+max_len = 160
+dropout_ratio = 0.1
+linear_in = 768
+num_classes = 2
+warmup_epochs = 0
+test_size = 0.2
+train_file ='./train.csv'
+test_file = './test.csv'
+model_name = 'bert-base-uncased'
+seed = 42
+use_sched = True
