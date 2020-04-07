@@ -185,7 +185,7 @@ def run():
         {'params': [p for n, p in params if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
 
-    optim = torch.optim.Adam(modified_params, lr=start_lr, eps=1e-8)
+    optim = torch.optim.AdamW(modified_params, lr=start_lr, eps=1e-8)
 
     total_steps = int(len(train_df) * epochs / train_bs)
     warmup_steps = int(len(train_df) * warmup_epochs / train_bs)
